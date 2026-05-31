@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grand Neon Piano v4.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://unpkg.com/tone"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000105; font-family: 'Pretendard', sans-serif; }
+        canvas { display: block; filter: contrast(1.15) brightness(1.1); }
+        
+        .ui-panel { position: absolute; top: 20px; left: 20px; color: #fff; pointer-events: none; z-index: 50; }
+        .mode-panel { position: absolute; top: 20px; right: 20px; z-index: 50; display: flex; flex-direction: column; gap: 8px; }
+
+        .playback-info {
+            position: absolute; top: 20px; left: 20px; width: 180px; padding: 8px 12px;
+            background: rgba(0, 5, 15, 0.45); backdrop-filter: blur(8px); border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; z-index: 60; opacity: 0;
+            transform: translateY(-5px); pointer-events: none; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .playback-info.active { opacity: 1; transform: translateY(0); }
+        .progress-container { width: 100%; height: 2px; background: rgba(255, 255, 255, 0.05); border-radius: 1px; margin-top: 6px; overflow: hidden; }
+        .progress-bar { width: 0%; height: 100%; background: #00f2fe; box-shadow: 0 0 5px rgba(0, 242, 254, 0.8); }
+
+        .mode-toggle {
+            background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 9px; font-weight: 800;
+            cursor: pointer; transition: all 0.2s ease; backdrop-filter: blur(10px); text-align: right; min-width: 170px;
+        }
+        .mode-toggle.active { background: rgba(0, 242, 254, 0.45); color: #fff; border-color: #00f2fe; box-shadow: 0 0 15px rgba(0, 242, 254, 0.2); }
+        
+        .data-monitor { position: absolute; right: 20px; top: 155px; font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #00f2fe; text-align: right; pointer-events: none; opacity: 0.35; }
+        
+        .upload-container {
+            position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 5, 15, 0.85); padding: 20px 40px; border-radius: 50px;
+            backdrop-filter: blur(20px); border: 1px solid rgba(0, 242, 254, 0.2); z-index: 20;
+            display: flex; flex-direction: column; align-items: center;
+        }
+
+        #file-label {
+            cursor: pointer; background: linear-gradient(135deg, #00f2fe 0%, #005f73 100%);
+            padding: 10px 30px; border-radius: 30px; color: #fff; font-weight: 900;
+            text-transform: uppercase; letter-spacing: 1px; font-size: 12px; transition: transform 0.2s;
+        }
+        #file-label:active { transform: scale(0.95); }
+
+        .download-btn {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            background: #ffffff; color: #000; padding: 10px 25px; border-radius: 30px;
+            font-weight: bold; font-size: 12px; cursor: pointer; display: none; z-index: 100;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.3); border: none; transition: opacity 1s ease, transform 0.5s ease;
+        }
+        .download-btn.fade-out { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(10px); }
+        .invisible-ui { opacity: 0 !important; transform: translateY(-10px); pointer-events: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="main-logo" class="ui-panel">
+    <h1 class="text-base font-black tracking-tighter italic leading-none">NEON<br><span class="text-cyan-400">PIANO</span></h1>
+    <p class="text-[5px] mt-1 opacity-40 uppercase tracking-[0.3em]">AI Music Theory Engine V4.0</p>
+</div>
+
+<div id="mode-panel" class="mode-panel">
+    <button id="mode-octave" class="mode-toggle">OCTAVE BOOST (OFF)</button>
+    <button id="mode-harmony" class="mode-toggle">AI SMART HARMONY (OFF)</button>
+    <button id="mode-correct" class="mode-toggle">AI CLASH RESOLUTION (OFF)</button>
+</div>
+
+<div id="playback-panel" class="playback-info">
+    <div class="flex justify-between items-center">
+        <div class="overflow-hidden">
+            <div id="now-playing-title" class="text-[9px] font-bold truncate w-[100px]">No File</div>
+            <div class="text-[6px] text-cyan-400 font-bold uppercase tracking-widest opacity-60">Playing</div>
+        </div>
+        <div id="play-time" class="text-[8px] font-mono opacity-60 text-right">0:00</div>
+    </div>
+    <div class="progress-container">
+        <div id="progress-bar" class="progress-bar"></div>
+    </div>
+</div>
+
+<div id="monitor" class="data-monitor">
+    [<span id="engine-status">STANDBY</span>]<br>
+    FPS: <span id="fps-counter">60</span>
+</div>
+
+<div class="upload-container" id="uploader">
+    <label id="file-label" for="midi-input">Inject MIDI</label>
+    <input type="file" id="midi-input" accept=".mid, .midi" class="hidden">
+    <div id="status-text" class="mt-2 text-[8px] font-medium text-cyan-400/40 uppercase tracking-widest text-center">
+        Double Click Screen to Init Audio
+    </div>
+</div>
+
+<button id="download-btn" class="download-btn">DOWNLOAD ARRANGED MIDI</button>
+
+<canvas id="mainCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+    const midiInput = document.getElementById('midi-input');
+    const statusText = document.getElementById('status-text');
+    const uploader = document.getElementById('uploader');
+    const fpsCounter = document.getElementById('fps-counter');
+    const engineStatus = document.getElementById('engine-status');
+    const downloadBtn = document.getElementById('download-btn');
+    
+    const mainLogo = document.getElementById('main-logo');
+    const modePanel = document.getElementById('mode-panel');
+    const playbackPanel = document.getElementById('playback-panel');
+    const progressBar = document.getElementById('progress-bar');
+    const playTimeText = document.getElementById('play-time');
+    const nowPlayingTitle = document.getElementById('now-playing-title');
+    
+    const btnOctave = document.getElementById('mode-octave');
+    const btnHarmony = document.getElementById('mode-harmony');
+    const btnCorrect = document.getElementById('mode-correct');
+
+    let sampler, isPlaying = false, midiData = null, rearrangedMidi = null; 
+    let currentFileName = "arrangement.mid", totalDuration = 0, audioReady = false;
+    let lastTime = performance.now(), frameCount = 0, fps = 0;
+    let downloadHideTimer = null;
+    
+    // 오디오 전용 타임라인 동기화 오프셋 (재생 버그 수정의 핵심)
+    const OFFSET_SEC = 1.0; 
+
+    let activeModes = { octave: false, harmony: false, correct: false };
+
+    const KEYBOARD_HEIGHT = 70;
+    const START_MIDI = 21, END_MIDI = 108, WHITE_KEYS_COUNT = 52, FALL_DURATION = 2.5; 
+    
+    const keyStates = {};
+    for (let i = START_MIDI; i <= END_MIDI; i++) {
+        keyStates[i] = { intensity: 0, hue: 0, isWhite: false, active: false, velocity: 1.0 };
+    }
+
+    let particles = [];
+
+    class Particle {
+        constructor(x, y, hue, velocity, isWhite = false) {
+            this.x = x; this.y = y;
+            this.vx = (Math.random() - 0.5) * (isWhite ? 5 : 3) * velocity;
+            this.vy = (-Math.random() * (isWhite ? 7 : 4) - 2) * velocity;
+            this.life = 1.0; this.hue = hue; this.isWhite = isWhite;
+            this.size = (Math.random() * (isWhite ? 1.5 : 1) + 0.5);
+        }
+        update() { this.x += this.vx; this.y += this.vy; this.vy += 0.25; this.life -= 0.03; }
+        draw() {
+            ctx.fillStyle = this.isWhite ? `rgba(255, 255, 255, ${this.life})` : `hsla(${this.hue}, 100%, 70%, ${this.life})`;
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+
+    function midiToNoteName(midi) {
+        const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        const octave = Math.floor(midi / 12) - 1;
+        return notes[midi % 12] + octave;
+    }
+
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    btnOctave.onclick = () => {
+        activeModes.octave = !activeModes.octave;
+        btnOctave.classList.toggle('active', activeModes.octave);
+        btnOctave.innerText = `OCTAVE BOOST (${activeModes.octave ? 'ON' : 'OFF'})`;
+    };
+
+    btnHarmony.onclick = () => {
+        activeModes.harmony = !activeModes.harmony;
+        btnHarmony.classList.toggle('active', activeModes.harmony);
+        btnHarmony.innerText = `AI SMART HARMONY (${activeModes.harmony ? 'ON' : 'OFF'})`;
+    };
+
+    btnCorrect.onclick = () => {
+        activeModes.correct = !activeModes.correct;
+        btnCorrect.classList.toggle('active', activeModes.correct);
+        btnCorrect.innerText = `AI CLASH RESOLUTION (${activeModes.correct ? 'ON' : 'OFF'})`;
+    };
+
+    // --- V4.0 화성학 기반 상황 인식 엔진 ---
+    async function processAIEngines(originalMidi) {
+        engineStatus.innerText = "MUSIC_THEORY_ANALYSIS";
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                const clonedMidi = new Midi(originalMidi.toArray());
+                
+                // 1. 시점별 분석을 위해 모든 노트를 평면화 및 정렬
+                let allNotes = [];
+                clonedMidi.tracks.forEach(track => {
+                    if (track.notes) track.notes.forEach(n => allNotes.push({...n}));
+                });
+                allNotes.sort((a, b) => a.time - b.time);
+
+                // 특정 시점의 최저음(Bass)과 최고음(Melody)을 찾는 헬퍼 함수
+                function getBassNoteAt(time) {
+                    let active = allNotes.filter(n => time >= n.time && time < n.time + n.duration);
+                    return active.length > 0 ? active.reduce((p, c) => (c.midi < p.midi ? c : p)) : null;
+                }
+                function getMelodyNoteAt(time) {
+                    let active = allNotes.filter(n => time >= n.time && time < n.time + n.duration);
+                    return active.length > 0 ? active.reduce((p, c) => (c.midi > p.midi ? c : p)) : null;
+                }
+
+                clonedMidi.tracks.forEach((track) => {
+                    const originalNotes = [...track.notes];
+                    if (originalNotes.length === 0) return;
+                    const newTrackNotes = [];
+
+                    originalNotes.forEach((note) => {
+                        let finalMidi = note.midi;
+                        let isAI = false;
+
+                        const bass = getBassNoteAt(note.time);
+                        const isBass = (bass && bass.midi === note.midi);
+                        const melody = getMelodyNoteAt(note.time);
+                        const isMelody = (melody && melody.midi === note.midi);
+
+                        // [엔진 1] Clash Resolution (기괴한 불협화음 해소)
+                        // 베이스 음과 충돌하는 단2도(1)나 트라이톤(6)을 부드러운 음정으로 회피
+                        if (activeModes.correct && bass && !isBass) {
+                            let interval = (finalMidi - bass.midi) % 12;
+                            if (interval < 0) interval += 12;
+                            if (interval === 1 || interval === 6) {
+                                finalMidi += 1; // 단2도->장2도, 증4도->완전5도로 회피
+                                isAI = true;
+                            } else if (interval === 11 && finalMidi < 60) {
+                                finalMidi -= 1; // 저음역대의 장7도를 단7도로 안정화
+                                isAI = true;
+                            }
+                        }
+
+                        finalMidi = Math.max(START_MIDI, Math.min(END_MIDI, finalMidi));
+
+                        newTrackNotes.push({
+                            midi: finalMidi,
+                            name: midiToNoteName(finalMidi),
+                            velocity: note.velocity,
+                            time: note.time,
+                            duration: note.duration,
+                            isAI: isAI 
+                        });
+
+                        // [엔진 2] Octave Boost (풍부함)
+                        if (activeModes.octave) {
+                            if (isBass && finalMidi > 33) {
+                                const m = finalMidi - 12;
+                                newTrackNotes.push({ midi: m, name: midiToNoteName(m), velocity: note.velocity * 0.55, time: note.time, duration: note.duration, isAI: true });
+                            }
+                            if (isMelody && finalMidi < 96) {
+                                const m = finalMidi + 12;
+                                newTrackNotes.push({ midi: m, name: midiToNoteName(m), velocity: note.velocity * 0.45, time: note.time, duration: note.duration, isAI: true });
+                            }
+                        }
+
+                        // [엔진 3] Smart Harmony (화성학적 접근)
+                        // 단조/장조 에러를 막기 위해, 베이스와 가장 잘 어울리는 보조 선율(3도/4도/6도)을 실시간으로 쌓음
+                        if (activeModes.harmony && isMelody && finalMidi > 60 && !isAI) {
+                            if (bass && (finalMidi - bass.midi > 12)) {
+                                let cand1 = finalMidi - 3; // 단3도 아래
+                                let cand2 = finalMidi - 4; // 장3도 아래
+                                
+                                let int1 = (cand1 - bass.midi) % 12; if (int1 < 0) int1 += 12;
+                                let int2 = (cand2 - bass.midi) % 12; if (int2 < 0) int2 += 12;
+                                
+                                let chosenCand = cand1;
+                                // 베이스와 협화음정(0,3,4,5,7,8,9)을 이루는 녀석을 지능적으로 채택
+                                const safeIntervals = [0, 3, 4, 5, 7, 8, 9];
+                                
+                                if (safeIntervals.includes(int2) && !safeIntervals.includes(int1)) {
+                                    chosenCand = cand2;
+                                } else if (!safeIntervals.includes(int1) && !safeIntervals.includes(int2)) {
+                                    chosenCand = finalMidi - 5; // 3도가 둘다 불협화일 땐 멜로디 완전4도 아래로 방어
+                                }
+
+                                chosenCand = Math.max(START_MIDI, Math.min(END_MIDI, chosenCand));
+
+                                newTrackNotes.push({
+                                    midi: chosenCand,
+                                    name: midiToNoteName(chosenCand),
+                                    velocity: note.velocity * 0.65,
+                                    time: note.time,
+                                    duration: note.duration,
+                                    isAI: true
+                                });
+                            }
+                        }
+                    });
+
+                    track.notes = newTrackNotes;
+                });
+                resolve(clonedMidi);
+            }, 600);
+        });
+    }
+
+    async function initSampler() {
+        if (audioReady) return;
+        statusText.innerText = "Loading Acoustic Grand Samples... (Please wait)";
+
+        const masterLimiter = new Tone.Limiter(-1).toDestination(); 
+        const masterReverb = new Tone.Reverb({ roomSize: 0.6, wet: 0.15, decay: 2.0 }).connect(masterLimiter);
+
+        sampler = new Tone.Sampler({
+            urls: {
+                "A0": "A0.mp3", "C1": "C1.mp3", "D#1": "Ds1.mp3", "F#1": "Fs1.mp3",
+                "A1": "A1.mp3", "C2": "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3",
+                "A2": "A2.mp3", "C3": "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3",
+                "A3": "A3.mp3", "C4": "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3",
+                "A4": "A4.mp3", "C5": "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3",
+                "A5": "A5.mp3", "C6": "C6.mp3", "D#6": "Ds6.mp3", "F#6": "Fs6.mp3",
+                "A6": "A6.mp3", "C7": "C7.mp3", "D#7": "Ds7.mp3", "F#7": "Fs7.mp3",
+                "A7": "A7.mp3", "C8": "C8.mp3"
+            },
+            release: 1.5, 
+            baseUrl: "https://tonejs.github.io/audio/salamander/",
+            onload: () => { audioReady = true; statusText.innerText = "HQ Piano Ready. Inject MIDI."; },
+            onerror: (err) => { statusText.innerText = "Network Error. Please Retry."; }
+        }).connect(masterReverb);
+    }
+
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function getVisualMidi(midi) { return Math.max(START_MIDI, Math.min(END_MIDI, midi)); }
+
+    function getNoteX(midi) {
+        const vMidi = getVisualMidi(midi);
+        const whiteKeyWidth = canvas.width / WHITE_KEYS_COUNT;
+        let whiteKeyCount = 0;
+        for (let i = START_MIDI; i < vMidi; i++) {
+            if (![1, 3, 6, 8, 10].includes(i % 12)) whiteKeyCount++;
+        }
+        const isBlack = [1, 3, 6, 8, 10].includes(vMidi % 12);
+        return isBlack ? (whiteKeyCount * whiteKeyWidth) - (whiteKeyWidth * 0.33) : whiteKeyCount * whiteKeyWidth;
+    }
+
+    midiInput.onchange = async function() {
+        if (!audioReady) await initSampler();
+        const file = this.files[0];
+        if (!file) return;
+        
+        clearTimeout(downloadHideTimer);
+        downloadBtn.style.display = 'none';
+        downloadBtn.classList.remove('fade-out');
+
+        currentFileName = file.name;
+        nowPlayingTitle.innerText = file.name;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            let midi = new Midi(e.target.result);
+            
+            if(activeModes.octave || activeModes.harmony || activeModes.correct) {
+                midi = await processAIEngines(midi);
+                rearrangedMidi = midi;
+            } else {
+                rearrangedMidi = null;
+            }
+
+            midiData = midi;
+            totalDuration = midi.duration;
+            
+            // 재생 버그 수정의 핵심: Transport 시간 엄격 통제
+            await Tone.start();
+            Tone.Transport.stop();
+            Tone.Transport.cancel();
+            Tone.Transport.position = 0; 
+            
+            isPlaying = true;
+            
+            mainLogo.classList.add('invisible-ui');
+            modePanel.classList.add('invisible-ui');
+            playbackPanel.classList.add('active');
+            uploader.style.opacity = "0";
+            uploader.style.pointerEvents = "none";
+            
+            midi.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    Tone.Transport.schedule((time) => {
+                        const targetNoteName = note.name || (note.midi ? midiToNoteName(note.midi) : null);
+                        if (targetNoteName) {
+                            sampler.triggerAttackRelease(targetNoteName, note.duration, time, note.velocity);
+                            createParticles(note.midi, note.velocity, note.isAI);
+                        }
+                    }, note.time + OFFSET_SEC); // 절대 시간이 아닌 Transport 상대 시간 배정
+                });
+            });
+
+            Tone.Transport.schedule(() => {
+                isPlaying = false;
+                mainLogo.classList.remove('invisible-ui');
+                modePanel.classList.remove('invisible-ui');
+                playbackPanel.classList.remove('active');
+                uploader.style.opacity = "1";
+                uploader.style.pointerEvents = "auto";
+                
+                if(activeModes.octave || activeModes.harmony || activeModes.correct) {
+                    downloadBtn.style.display = 'block';
+                    clearTimeout(downloadHideTimer);
+                    downloadHideTimer = setTimeout(() => {
+                        downloadBtn.classList.add('fade-out');
+                        setTimeout(() => { downloadBtn.style.display = 'none'; }, 1000);
+                    }, 7000);
+                }
+                engineStatus.innerText = "STANDBY";
+                midiInput.value = ""; // 연속 재생을 위해 파일 인풋 강제 초기화
+            }, totalDuration + OFFSET_SEC + 0.5);
+
+            Tone.Transport.start();
+            engineStatus.innerText = "PLAYING";
+        };
+        reader.readAsArrayBuffer(file);
+    };
+
+    downloadBtn.onclick = () => {
+        if (!rearrangedMidi) return;
+        const blob = new Blob([rearrangedMidi.toArray()], { type: "audio/midi" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `[AI_REARRANGED]_${currentFileName}`;
+        a.click();
+    };
+
+    function createParticles(midi, velocity, isAI = false) {
+        const x = getNoteX(midi) + (canvas.width / WHITE_KEYS_COUNT * 0.4);
+        const vMidi = getVisualMidi(midi);
+        const hue = (vMidi * 13) % 360;
+        const count = Math.floor(3 + velocity * 5);
+        
+        // 원본 색상 파티클 터짐 (항상 실행)
+        for(let i=0; i<count; i++) {
+            particles.push(new Particle(x, canvas.height - KEYBOARD_HEIGHT, hue, velocity, false));
+        }
+        
+        // AI가 추가한 노트라면, 하얀 파티클을 덧붙여서 혼합 폭발 효과 연출
+        if(isAI) {
+            for(let i=0; i<count; i++) {
+                particles.push(new Particle(x, canvas.height - KEYBOARD_HEIGHT, hue, velocity, true));
+            }
+        }
+    }
+
+    function updateKeyStates() {
+        const currentTime = isPlaying ? Tone.Transport.seconds - OFFSET_SEC : -1;
+        if(isPlaying && totalDuration > 0) {
+            const elapsed = Math.max(0, currentTime);
+            progressBar.style.width = `${Math.min(100, (elapsed / totalDuration) * 100)}%`;
+            playTimeText.innerText = formatTime(elapsed);
+        }
+
+        for (let i = START_MIDI; i <= END_MIDI; i++) {
+            let activeInFrame = false, currentVel = 0, nHue = (i * 13) % 360;
+            // 건반 자체는 isWhite를 더이상 기억할 필요 없이 고유 색상만 발산함
+            if (midiData && currentTime >= 0) {
+                midiData.tracks.forEach(t => { 
+                    t.notes.forEach(n => {
+                        const vMidi = getVisualMidi(n.midi);
+                        if (vMidi === i && currentTime >= n.time && currentTime <= n.time + n.duration) {
+                            activeInFrame = true; currentVel = n.velocity; nHue = (vMidi * 13) % 360;
+                        }
+                    });
+                });
+            }
+            if (activeInFrame) {
+                keyStates[i].intensity = 1.0; keyStates[i].hue = nHue; keyStates[i].active = true; keyStates[i].velocity = currentVel;
+            } else {
+                keyStates[i].active = false; 
+                keyStates[i].intensity -= 0.03; 
+                if (keyStates[i].intensity < 0) keyStates[i].intensity = 0;
+            }
+        }
+    }
+
+    function drawKeyboard() {
+        const whiteKeyWidth = canvas.width / WHITE_KEYS_COUNT;
+        const blackKeyWidth = whiteKeyWidth * 0.6;
+        let whiteIdx = 0;
+        for (let i = START_MIDI; i <= END_MIDI; i++) {
+            const isBlack = [1, 3, 6, 8, 10].includes(i % 12);
+            if (isBlack) continue;
+            const x = whiteIdx * whiteKeyWidth;
+            const state = keyStates[i];
+            ctx.fillStyle = '#fefefe';
+            ctx.fillRect(x, canvas.height - KEYBOARD_HEIGHT, whiteKeyWidth, KEYBOARD_HEIGHT);
+            
+            if (state.intensity > 0) {
+                const alpha = state.intensity * (0.3 + state.velocity * 0.7);
+                // AI 여부와 관계없이 무조건 고유의 네온 색상으로 건반을 비춤
+                ctx.fillStyle = `hsla(${state.hue}, 80%, 60%, ${alpha * 0.7})`;
+                ctx.shadowColor = `hsla(${state.hue}, 100%, 60%, 1)`;
+                ctx.shadowBlur = 15 * state.intensity;
+                ctx.fillRect(x, canvas.height - KEYBOARD_HEIGHT, whiteKeyWidth, KEYBOARD_HEIGHT);
+                ctx.shadowBlur = 0;
+            }
+            ctx.strokeStyle = 'rgba(0,0,0,0.06)'; 
+            ctx.strokeRect(x, canvas.height - KEYBOARD_HEIGHT, whiteKeyWidth, KEYBOARD_HEIGHT);
+            whiteIdx++;
+        }
+        whiteIdx = 0;
+        for (let i = START_MIDI; i <= END_MIDI; i++) {
+            if ([1, 3, 6, 8, 10].includes(i % 12)) {
+                const x = (whiteIdx * whiteKeyWidth) - (blackKeyWidth / 2);
+                const state = keyStates[i];
+                if (state.intensity > 0) {
+                    const brightness = 10 + (state.velocity * 40 * state.intensity);
+                    // 검은 건반 역시 고유의 색상 유지
+                    ctx.fillStyle = `hsla(${state.hue}, 70%, ${brightness}%, 1)`;
+                    ctx.shadowColor = `hsla(${state.hue}, 100%, 60%, 1)`;
+                    ctx.shadowBlur = 10 * state.intensity; 
+                    ctx.fillRect(x, canvas.height - KEYBOARD_HEIGHT, blackKeyWidth, KEYBOARD_HEIGHT * 0.6); 
+                    ctx.shadowBlur = 0;
+                } else { 
+                    ctx.fillStyle = '#111'; 
+                    ctx.fillRect(x, canvas.height - KEYBOARD_HEIGHT, blackKeyWidth, KEYBOARD_HEIGHT * 0.6); 
+                }
+                ctx.strokeStyle = '#222'; 
+                ctx.strokeRect(x, canvas.height - KEYBOARD_HEIGHT, blackKeyWidth, KEYBOARD_HEIGHT * 0.6);
+            } else whiteIdx++;
+        }
+    }
+
+    function drawFallingNotes() {
+        if (!midiData || !isPlaying) return;
+        const currentTime = Tone.Transport.seconds - OFFSET_SEC;
+        const whiteKeyWidth = canvas.width / WHITE_KEYS_COUNT;
+        midiData.tracks.forEach(track => {
+            track.notes.forEach(note => {
+                if (note.time + note.duration > currentTime && note.time < currentTime + FALL_DURATION) {
+                    const vMidi = getVisualMidi(note.midi);
+                    const isBlack = [1, 3, 6, 8, 10].includes(vMidi % 12);
+                    const x = getNoteX(note.midi);
+                    const width = isBlack ? whiteKeyWidth * 0.6 : whiteKeyWidth;
+                    const y = (canvas.height - KEYBOARD_HEIGHT) - ((note.time - currentTime) / FALL_DURATION * (canvas.height - KEYBOARD_HEIGHT));
+                    const height = (note.duration / FALL_DURATION) * (canvas.height - KEYBOARD_HEIGHT);
+                    const hue = (vMidi * 13) % 360;
+                    const grad = ctx.createLinearGradient(x, y - height, x, y);
+                    
+                    // 떨어지는 막대만 AI 여부에 따라 하얀색으로 칠함
+                    if (note.isAI) {
+                        grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+                        grad.addColorStop(1, 'rgba(255, 255, 255, 0.7)');
+                        ctx.shadowColor = 'white';
+                    } else {
+                        grad.addColorStop(0, `hsla(${hue}, 100%, 50%, 0)`);
+                        grad.addColorStop(1, `hsla(${hue}, 100%, 60%, ${0.2 + note.velocity * 0.5})`);
+                        ctx.shadowColor = `hsla(${hue}, 100%, 60%, 0.4)`;
+                    }
+                    ctx.fillStyle = grad;
+                    if (currentTime >= note.time && currentTime <= note.time + note.duration) ctx.shadowBlur = 8;
+                    ctx.beginPath(); ctx.roundRect(x + 1, y - height, width - 2, height, 2); ctx.fill(); ctx.shadowBlur = 0;
+                }
+            });
+        });
+    }
+
+    function animate(now) {
+        frameCount++;
+        if (now - lastTime >= 1000) { fps = frameCount; frameCount = 0; lastTime = now; fpsCounter.innerText = fps; }
+        ctx.fillStyle = '#000105'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (isPlaying) {
+            drawFallingNotes();
+            particles = particles.filter(p => p.life > 0);
+            particles.forEach(p => { p.update(); p.draw(); });
+        }
+        updateKeyStates(); drawKeyboard();
+        requestAnimationFrame(animate);
+    }
+
+    document.body.onclick = async () => { if (!audioReady) await initSampler(); };
+    requestAnimationFrame(animate);
+</script>
+</body>
+</html>
